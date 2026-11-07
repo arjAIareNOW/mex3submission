@@ -1,0 +1,11 @@
+* text=auto
+*.pdf binary
+*.onnx binary
+*.png binary
+*.docx binary
+*.xlsx binary
+*.wav binary
+# the Pi runs these with bash / systemd: Unix line endings always
+*.sh text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf

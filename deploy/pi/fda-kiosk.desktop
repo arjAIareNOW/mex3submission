@@ -1,0 +1,5 @@
+[Desktop Entry]
+Type=Application
+Name=Elkit display
+Exec=@APP@/deploy/pi/kiosk.sh
+X-GNOME-Autostart-enabled=true

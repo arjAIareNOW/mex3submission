@@ -1,0 +1,1028 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elkit</title>
+<style>
+  :root { --bg:#0b0d12; --panel:#12161e; --line:#222a36; --text:#e8ecf2; --muted:#7c8696; --accent:#7aa2ff; --accent2:#b07aff; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+         display: grid; grid-template-columns: minmax(220px, 32%) minmax(0, 1fr); gap: 16px; padding: 16px; overflow: hidden; }
+  /* ---- left: the voice ---- */
+  #voice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; position: relative; }
+  #pulse { position: relative; width: 180px; height: 180px; }
+  #pulse .core { position: absolute; inset: 50px; border-radius: 50%;
+                 background: radial-gradient(circle at 35% 35%, #c9d8ff, var(--accent) 45%, var(--accent2));
+                 transition: transform .08s linear, opacity .3s; opacity: .55; }
+  #pulse .ring { position: absolute; inset: 50px; border-radius: 50%; border: 2px solid var(--accent); opacity: 0; }
+  body[data-s="speaking"] #pulse .core { opacity: 1; }
+  body[data-s="speaking"] #pulse .ring { animation: ripple 1.6s ease-out infinite; }
+  body[data-s="speaking"] #pulse .ring:nth-child(3) { animation-delay: .53s; }
+  body[data-s="speaking"] #pulse .ring:nth-child(4) { animation-delay: 1.06s; }
+  body[data-s="thinking"] #pulse .core { animation: breathe 1.2s ease-in-out infinite; opacity: .8; }
+  /* quiet tells: present (slow idle breath), hearing you (halo follows your voice), got it (a ring pulled in),
+     heard but not for me (a faint grey one), thinking (a small dot circling) */
+  #pulse { --hear: 0; }
+  /* your voice, small, under the name: flat and faint at rest, bars while you talk, a green glow when your words
+     were understood (grey: heard, but not for Elkit) */
+  #wave { width: 150px; height: 26px; margin-top: -18px; opacity: .35; transition: opacity .4s; display: block; }
+  body.hear #wave, #wave.got, #wave.skip { opacity: .85; }
+  body[data-s="listening"] #pulse .core { animation: idle 7s ease-in-out infinite; }
+  #pulse .core { box-shadow: 0 0 calc(var(--hear) * 46px) calc(var(--hear) * 6px) rgba(122,162,255, calc(var(--hear) * .55)); }
+  body.hear #pulse .core { opacity: calc(.6 + var(--hear) * .35); }
+  #pulse .catch { position: absolute; inset: 50px; border-radius: 50%; border: 1.5px solid #c9d8ff; opacity: 0; pointer-events: none; }
+  #pulse .catch.got { animation: absorb .7s ease-in forwards; }
+  #pulse .catch.skip { border-color: var(--muted); animation: absorb-faint .6s ease-in forwards; }
+  #pulse .orbit { position: absolute; inset: 38px; border-radius: 50%; opacity: 0; transition: opacity .4s; pointer-events: none; }
+  #pulse .orbit i { position: absolute; top: -3px; left: 50%; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%;
+                    background: #c9d8ff; box-shadow: 0 0 8px 2px rgba(176,122,255,.6); }
+  body[data-s="thinking"] #pulse .orbit { opacity: .9; animation: spin 1.3s linear infinite; }
+  @keyframes idle { 0%, 100% { transform: scale(1); opacity: .5; } 50% { transform: scale(1.035); opacity: .62; } }
+  @keyframes absorb { from { transform: scale(1.9); opacity: 0; } 35% { opacity: .55; } to { transform: scale(1); opacity: 0; } }
+  @keyframes absorb-faint { from { transform: scale(1.5); opacity: 0; } 40% { opacity: .25; } to { transform: scale(1); opacity: 0; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  body[data-s="offline"] #pulse .core { opacity: .15; filter: grayscale(1); }
+  @keyframes ripple { from { transform: scale(1); opacity: .6; } to { transform: scale(2.3); opacity: 0; } }
+  @keyframes breathe { 50% { transform: scale(1.08); } }
+  #name { font-size: 22px; font-weight: 600; letter-spacing: .04em; }
+  #conn { position: absolute; bottom: 0; left: 0; width: 8px; height: 8px; border-radius: 50%; background: #3ddc84; }
+  #conn.off { background: #ff5d5d; }
+  /* ---- right: what is being made ---- */
+  #stage { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; min-width: 0; }
+  #bar { position: absolute; top: 0; left: 0; height: 3px; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2));
+         transition: width .4s ease, opacity .4s; z-index: 3; opacity: 0; }
+  #bar.on { opacity: 1; }
+  #bar.wait { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { left: -30%; } to { left: 100%; } }
+  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #fff; transition: opacity .3s, filter .3s; }
+  iframe.updating { opacity: .45; filter: blur(1px); }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 16px; text-align: center; padding: 24px; }
+  /* `display: flex` above beats the hidden attribute: without this the empty box stays over the app and eats every click and scroll */
+  #empty[hidden] { display: none; }
+  #bar, #note { pointer-events: none; }   /* overlays on the app must never block it */
+  #note { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 3; background: rgba(10,12,18,.82);
+          border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--text);
+          white-space: nowrap; max-width: 90%; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity .3s; }
+  #note.on { opacity: 1; }
+  /* ---- Interface sub-tabs: one per app, game, video, photo set or search (switch by voice: "go to the snake tab") ---- */
+  #sub { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; min-height: 28px; }
+  #sub::-webkit-scrollbar { display: none; }
+  #sub[hidden] { display: none; }
+  #sub button { flex: none; display: flex; align-items: center; gap: 6px; background: #141922; color: var(--muted);
+                border: 1px solid var(--line); border-radius: 8px; padding: 4px 11px 4px 9px; font: inherit; font-size: 12.5px;
+                white-space: nowrap; cursor: pointer; transition: color .2s, border-color .2s, background .2s; }
+  #sub button::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--kc); }
+  #sub button.on { color: var(--text); border-color: var(--kc); background: #1a2030; }
+  #sub .k-site { --kc: #7aa2ff; } #sub .k-app { --kc: #b07aff; } #sub .k-game { --kc: #3ddc84; }
+  #sub .k-video { --kc: #ff5d5d; } #sub .k-photos { --kc: #ffcf5c; } #sub .k-links { --kc: #4de1ff; }
+  #views { position: absolute; inset: 0; z-index: 1; }
+  #views:empty { pointer-events: none; }
+  .view { position: absolute; inset: 0; animation: fadein .25s ease-out; }
+  .view[hidden] { display: none; }
+  .view.video, .view.photos { background: #05070b; }
+  .view.video iframe { background: #000; }
+  .view.photos img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .view.photos .cap { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; gap: 10px;
+                      padding: 18px 12px 8px; font-size: 12px; color: #c9d1dc; background: linear-gradient(transparent, rgba(0,0,0,.75)); }
+  .view.photos .cap span:first-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .view.links { overflow-y: auto; padding: 14px 14px 18px; background: var(--panel); }
+  .view.links h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .view.links ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .view.links a { display: block; padding: 10px 12px; border-radius: 10px; color: var(--text); text-decoration: none;
+                  background: #151a24; border: 1px solid var(--line); }
+  .view.links a b { display: block; font-size: 14.5px; font-weight: 600; }
+  .view.links a small { display: block; color: var(--accent); font-size: 12px; margin-top: 2px; }
+  .view.links a span { display: block; color: var(--muted); font-size: 12.5px; margin-top: 4px; line-height: 1.35; }
+  .view.links .n { color: var(--accent); font-weight: 700; margin-right: 6px; }
+  .view.links .sum { max-width: 760px; margin: 0 auto; padding: 18px 10px 10px; }
+  .view.links .sum .q { font: 600 12px system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .view.links .sum h2 { margin: 6px 0 14px; font: 750 26px/1.2 system-ui, sans-serif; color: var(--text); }
+  .view.links .sum .lead { font: 450 17px/1.55 system-ui, sans-serif; color: var(--text); margin: 0 0 18px;
+                           padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 9%, transparent);
+                           border-left: 4px solid var(--accent); }
+  .view.links .sum h5 { margin: 0 0 10px; font: 650 13px system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); }
+  .view.links .sum ol { margin: 0; padding: 0; list-style: none; counter-reset: k; display: flex; flex-direction: column; gap: 10px; }
+  .view.links .sum li { counter-increment: k; display: flex; gap: 12px; align-items: flex-start; font: 450 15.5px/1.45 system-ui, sans-serif; color: var(--text); }
+  .view.links .sum li::before { content: counter(k); flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+                                background: var(--accent); color: #0b0d12; font: 700 12.5px system-ui, sans-serif; margin-top: 1px; }
+  .view.links .sum .src { margin-top: 20px; font: 500 12.5px system-ui, sans-serif; color: var(--muted); }
+  .view.links .sum .wait { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .view.links .sum .wait i { display: block; height: 14px; border-radius: 7px; background: linear-gradient(90deg, #ffffff10, #ffffff22, #ffffff10);
+                             background-size: 200% 100%; animation: sumwait 1.2s linear infinite; }
+  .view.links .sum .wait i:nth-child(2) { width: 88%; } .view.links .sum .wait i:nth-child(3) { width: 72%; }
+  @keyframes sumwait { from { background-position: 200% 0; } to { background-position: 0 0; } }
+  @keyframes fadein { from { opacity: 0; } }
+  @keyframes rise { from { transform: translateY(12px); opacity: 0; } }
+  /* ---- three tabs: Interface (games, websites, videos, links, photos), Virtual Home (the room),
+     Virtual Office (slides, documents, spreadsheets) ---- */
+  #sub button[hidden] { display: none; }
+  #lists { height: 100%; overflow: hidden; font: 600 10.5px/1.35 system-ui, sans-serif; color: #2b3344; }
+  #lists h5 { margin: 0 0 2px; font: 800 10px system-ui, sans-serif; letter-spacing: .05em; text-transform: uppercase; color: #6a5a2a; }
+  #lists ul { margin: 0 0 4px; padding-left: 13px; }
+  #lists li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lists .none { color: #9a8f74; margin-top: 30px; text-align: center; }
+  #right { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+  #tabs { display: flex; gap: 6px; }
+  #tabs[hidden] { display: none; }
+  #tabs button { background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 999px;
+                 padding: 5px 14px; font: inherit; font-size: 13px; cursor: pointer; }
+  #tabs button.on { color: var(--text); border-color: var(--accent); background: rgba(122,162,255,.12); }
+  #stage { flex: 1; }
+  #stage[hidden] { display: none; }
+  #room { flex: 1; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+          display: flex; align-items: center; justify-content: center; }
+  #scene { width: 100%; height: 100%; display: block; }
+  #scene rect, #scene circle, #scene path, #scene ellipse, #scene stop { transition: fill .7s, opacity .7s, stroke .7s, stroke-dasharray .7s, stop-color .7s; }
+  #scene .lbl { font: 600 13px system-ui, sans-serif; fill: #8f99aa; }
+  #scene .val { font: 700 20px system-ui, sans-serif; fill: #e8ecf2; font-variant-numeric: tabular-nums; }
+  #scene .val.small { font-size: 15px; }
+  #scene .sub { font: 600 9px system-ui, sans-serif; fill: #7c8696; letter-spacing: .04em; text-transform: uppercase; }
+  #waves { opacity: 0; transition: opacity .5s; }
+  #waves.on { opacity: 1; }
+  #waves.on path { animation: wave 1.4s ease-out infinite; }
+  #waves.on path:nth-child(2) { animation-delay: .2s; }
+  #waves.on path:nth-child(3) { animation-delay: .4s; }
+  @keyframes wave { 0% { opacity: .15; } 30% { opacity: 1; } 100% { opacity: .15; } }
+  #notes { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; height: 100%; }
+  #notes .note { width: 63px; height: 50px; padding: 5px 6px; font: 600 10.5px/1.2 system-ui, sans-serif; color: #3a2f10; border-radius: 2px;
+                 box-shadow: 0 2px 4px rgba(0,0,0,.35); overflow: hidden; }
+  #notes .note span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  #notes .note small + span { -webkit-line-clamp: 2; }
+  #notes .note:nth-child(1) { background: #ffe58a; transform: rotate(-2.5deg); }
+  #notes .note:nth-child(2) { background: #a8e6ff; transform: rotate(2deg); }
+  #notes .note:nth-child(3) { background: #ffc2d1; transform: rotate(1.5deg); }
+  #notes .note:nth-child(4) { background: #c4f5b0; transform: rotate(-1.5deg); }
+  #notes .none { color: #b8a58f; font: 600 11px system-ui, sans-serif; margin: auto; }
+  #notes .note small { display: block; font-weight: 700; opacity: .7; }
+  #room[hidden] { display: none; }
+  #room:not([hidden]), #stage:not([hidden]) { animation: fadein .35s ease-out; }   /* a smooth tab change */
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex;
+          flex-direction: column; gap: 8px; min-width: 0; }
+  .card h3 { margin: 0; font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .big { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .card button { background: #1c2230; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+                 padding: 6px 12px; font: inherit; cursor: pointer; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .lamp { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .bulb { width: 46px; height: 46px; border-radius: 50%; flex: none; transition: all .4s; border: 2px solid #333; background: #20262e; }
+  .list { margin: 0; padding: 0; list-style: none; font-size: 14px; display: flex; flex-direction: column; gap: 3px; }
+  .list li { display: flex; justify-content: space-between; gap: 8px; }
+  .muted { color: var(--muted); }
+  #ring { position: fixed; inset: 0; background: rgba(13,17,23,.92); display: flex; flex-direction: column; align-items: center;
+          justify-content: center; gap: 18px; z-index: 9; animation: flash 1.2s ease-in-out infinite; }
+  #ring[hidden] { display: none; }
+  /* ringing: no full-screen overlay (RING_OVERLAY off); the timer clock wiggles and pulses red instead */
+  #clock.ringing { animation: wiggle .45s ease-in-out infinite; }
+  @keyframes wiggle { 0%, 100% { transform: rotate(0deg); } 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
+  #clock.ringing #tmArc { stroke: #ff5a52 !important; stroke-dasharray: 100 0 !important; opacity: 1 !important;
+                          animation: ringglow .45s ease-in-out infinite alternate; }
+  @keyframes ringglow { from { stroke-width: 4; filter: none; } to { stroke-width: 8; filter: drop-shadow(0 0 6px #ff5a52); } }
+  #ringStop { display: none; cursor: pointer; }
+  /* the pretend phone (Virtual Home): a small phone on the side table; its screen comes up for a call or a text */
+  #room { position: relative; }
+  #phoneSmall.on .scr { fill: #7aa2ff; } #phoneSmall.ring { animation: phwiggle .5s ease-in-out infinite alternate; transform-box: fill-box; transform-origin: center; }
+  @keyframes phwiggle { from { transform: rotate(-7deg); } to { transform: rotate(7deg); } }
+  #phone { position: absolute; right: 4%; top: 50%; width: 214px; height: 400px; margin-top: -200px; border-radius: 34px;
+           background: #0d1017; border: 3px solid #2e3647; box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 0 0 6px #151a24;
+           padding: 30px 16px 18px; display: flex; flex-direction: column; align-items: center; text-align: center; color: #e8ecf2;
+           transition: transform .45s cubic-bezier(.2,.9,.3,1.2), opacity .35s; transform: translateY(0); }
+  #phone[hidden] { display: flex; opacity: 0; transform: translateY(40px) scale(.96); pointer-events: none; }
+  #phone::before { content: ""; position: absolute; top: 12px; left: 50%; width: 56px; height: 7px; margin-left: -28px; border-radius: 4px; background: #232a38; }
+  #phone .who { font: 700 22px system-ui, sans-serif; margin-top: 10px; }
+  #phone .num { font: 500 12.5px system-ui, sans-serif; color: var(--muted); margin-top: 3px; letter-spacing: .3px; }
+  #phone .st { font: 600 14px system-ui, sans-serif; color: var(--muted); margin-top: 14px; min-height: 20px; }
+  #phone .st.bad { color: #ff6b62; }
+  #phone .clock { font: 600 15px ui-monospace, monospace; color: #c6cede; margin-top: 4px; min-height: 20px; }
+  #phone .av { width: 82px; height: 82px; border-radius: 50%; margin-top: 18px; display: grid; place-items: center; position: relative;
+               background: linear-gradient(135deg, #ffb0c8, #b07aff); font: 800 34px system-ui, sans-serif; color: #fff; }
+  #phone .av.dad { background: linear-gradient(135deg, #8fd3ff, #7aa2ff); }
+  #phone .av.sis, #phone .mini.sis { background: linear-gradient(135deg, #ffb3d1, #e879b9); }
+  #phone .av.bro, #phone .mini.bro { background: linear-gradient(135deg, #9be8b4, #3fbf7f); }
+  #phone .people { width: 100%; margin-top: 18px; display: flex; flex-direction: column; gap: 9px; }
+  #phone .people button { display: flex; gap: 9px; align-items: center; text-align: left; padding: 9px 10px; border-radius: 14px;
+                          border: 1px solid #2e3647; background: #151a24; color: #e8ecf2; font: 600 15px system-ui, sans-serif; cursor: pointer; }
+  #phone .people b { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #0b0d12; display: grid;
+                     place-items: center; font-size: 12px; flex: none; }
+  #phone .mini { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #0b0d12;
+                 font: 700 16px system-ui, sans-serif; background: linear-gradient(135deg, #ffb0c8, #b07aff); }
+  #phone .av { flex: none; } #phone.compose .av, #phone.sent .av { width: 56px; height: 56px; font-size: 24px; margin-top: 8px; }
+  #phone .av i { position: absolute; inset: -6px; border-radius: 50%; border: 2px solid #7aa2ff; opacity: 0; }
+  #phone.calling .av i { animation: phring 1.6s ease-out infinite; } #phone.calling .av i + i { animation-delay: .8s; }
+  @keyframes phring { from { inset: -4px; opacity: .8; } to { inset: -30px; opacity: 0; } }
+  #phone .end { margin-top: auto; width: 58px; height: 58px; border-radius: 50%; border: 0; background: #e5484d; color: #fff;
+                display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 18px rgba(229,72,77,.4); }
+  #phone .end svg { width: 26px; height: 26px; transform: rotate(135deg); }
+  #phone .thread { width: 100%; margin-top: 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+  #phone .bubble { max-width: 88%; padding: 9px 12px; border-radius: 16px 16px 4px 16px; background: #3b6cf6; color: #fff;
+                   font: 500 14px/1.3 system-ui, sans-serif; text-align: left; animation: phpop .35s cubic-bezier(.2,.9,.3,1.3); }
+  @keyframes phpop { from { transform: translateY(10px) scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
+  #phone .dlv { font: 600 11.5px system-ui, sans-serif; color: #7ee2a8; }
+  #phone .quick { width: 100%; margin-top: 12px; display: flex; flex-direction: column; gap: 7px; }
+  #phone .quick button { display: flex; gap: 8px; align-items: center; text-align: left; padding: 8px 10px; border-radius: 12px;
+                         border: 1px solid #2e3647; background: #151a24; color: #e8ecf2; font: 500 13.5px system-ui, sans-serif; cursor: pointer; }
+  #phone .quick b { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #0b0d12; display: grid; place-items: center;
+                    font: 800 11.5px system-ui, sans-serif; flex: none; }
+  #phone .hint { font: 500 12.5px system-ui, sans-serif; color: var(--muted); margin-top: 12px; }
+  #ringStop.on { display: inline; }
+  /* live view (tests/pc_watch.py): what the scripted person says and what Elkit answers; hidden normally */
+  #demo { position: absolute; left: 0; right: 0; bottom: 18px; display: flex; flex-direction: column; gap: 8px; padding: 0 6px; }
+  #demo[hidden] { display: none; }
+  #demo .scene { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); text-align: center; }
+  #demo .line { font-size: 14px; line-height: 1.35; padding: 8px 10px; border-radius: 10px; background: var(--panel);
+                border: 1px solid var(--line); min-height: 20px; }
+  #demo .line b { display: block; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; }
+  #demo .you b { color: #ffcf5c; } #demo .bot b { color: var(--accent); }
+  #demo .line:empty, #demo .line.none { display: none; }
+  /* the pick pop-up: 4 numbered choices ("show me other birds", colour schemes before a website) */
+  #choices { position: absolute; inset: 0; z-index: 6; background: rgba(8,10,15,.97); display: flex; flex-direction: column;
+             align-items: center; justify-content: center; gap: 14px; padding: 18px; animation: chIn .25s ease-out; }
+  #choices[hidden] { display: none; }
+  #chTitle { margin: 0; font-size: 22px; font-weight: 600; }
+  #chGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; width: 100%; max-width: 900px; }
+  .ch { position: relative; background: var(--panel); border: 2px solid var(--line); border-radius: 14px; padding: 12px 10px 10px;
+        cursor: pointer; text-align: center; color: var(--text); font: inherit; }
+  .ch:hover, .ch.on { border-color: var(--accent); }
+  .ch .n { position: absolute; top: 8px; left: 8px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent);
+           color: #0b0d12; display: flex; align-items: center; justify-content: center; font-size: 17px; z-index: 1; }
+  .ch img { width: 100%; height: 110px; object-fit: contain; }
+  .ch .lbl { margin-top: 6px; font-size: 16px; font-weight: 600; }
+  .mock { height: 120px; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid #fff2; }
+  .mock .hd { height: 16px; flex: none; }
+  .mock .bd { flex: 1; padding: 7px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .mock .card { width: 100%; border-radius: 6px; padding: 5px 6px; font-size: 11px; line-height: 1.3; text-align: left;
+                box-shadow: 0 1px 3px #0003; }
+  .mock .btn { border-radius: 10px; padding: 3px 10px; font-size: 11px; font-weight: 600; }
+  #choices .muted { margin: 0; font-size: 15px; }
+  @keyframes chIn { from { opacity: 0; transform: scale(.97); } }
+  @media (max-width: 640px) { #chGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  #ring button { font-size: 22px; padding: 14px 44px; background: #d9534f; color: #fff; border: none; border-radius: 10px; }
+  @keyframes flash { 50% { background: rgba(120,20,20,.92); } }
+  @media (max-width: 640px) { body { grid-template-columns: 1fr; grid-template-rows: 150px 1fr; }
+    #pulse { width: 120px; height: 120px; } #pulse .core, #pulse .ring { inset: 34px; } #name, #wave { display: none; } }
+</style>
+</head>
+<body data-s="listening">
+<section id="voice">
+  <div id="pulse"><div class="core"></div><div class="ring"></div><div class="ring"></div><div class="ring"></div><div class="catch"></div><div class="orbit"><i></i></div></div>
+  <div id="name">Elkit</div>
+  <canvas id="wave" width="300" height="52" aria-hidden="true"></canvas>
+  <span id="conn" class="off"></span>
+  <div id="demo" hidden><div class="scene" id="dmScene"></div>
+    <div class="line you none" id="dmYou"><b>You</b><span></span></div>
+    <div class="line bot none" id="dmBot"><b>Elkit</b><span></span></div></div>
+</section>
+<section id="right">
+  <nav id="tabs"><button id="tDesign" class="on">Virtual Studio</button><button id="tRoom">Virtual Home</button><button id="tOffice">Virtual Office</button></nav>
+  <nav id="sub" hidden aria-label="Sub-tabs"></nav>
+  <section id="stage">
+    <div id="bar"></div>
+    <div id="empty">Elkit is listening.</div>
+    <div id="note"></div>
+    <div id="views"></div>
+    <div id="choices" hidden><div id="chTitle"></div><div id="chGrid"></div>
+      <p class="muted">Say a number or a name, or tap one</p></div>
+  </section>
+  <section id="room" hidden>
+    <svg id="scene" viewBox="0 -36 600 476" preserveAspectRatio="xMidYMid meet" role="img" aria-label="The room">
+      <defs>
+        <linearGradient id="gCone" x1="0" y1="0" x2="0" y2="1">
+          <stop class="lc" offset="0" stop-color="#ffd59a" stop-opacity=".7"/><stop class="lc" offset="1" stop-color="#ffd59a" stop-opacity="0"/></linearGradient>
+        <radialGradient id="gHalo"><stop class="lc" offset="0" stop-color="#ffd59a" stop-opacity=".95"/><stop class="lc" offset="1" stop-color="#ffd59a" stop-opacity="0"/></radialGradient>
+        <radialGradient id="gPool"><stop class="lc" offset="0" stop-color="#ffd59a" stop-opacity=".5"/><stop class="lc" offset="1" stop-color="#ffd59a" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect id="wall" y="-60" width="600" height="378" fill="#12161f"/>
+      <rect id="floor" y="318" width="600" height="160" fill="#0c0f15"/>
+      <line x1="0" y1="318" x2="600" y2="318" stroke="#252c3a" stroke-width="2"/>
+      <!-- window: the sky follows the time of day -->
+      <g transform="translate(36,40)">
+        <rect id="sky" width="128" height="104" rx="6" fill="#0d1b3a"/>
+        <g id="stars" fill="#fff"><circle cx="18" cy="18" r="1.3"/><circle cx="48" cy="36" r="1"/><circle cx="28" cy="58" r="1.2"/>
+          <circle cx="108" cy="62" r="1"/><circle cx="78" cy="14" r="1"/><circle cx="100" cy="30" r="1.2"/></g>
+        <circle id="sun" cx="92" cy="30" r="13" fill="#ffe08a"/>
+        <path d="M0 76 Q30 62 64 72 T128 68 V104 H0Z" fill="#0b1220" opacity=".6"/>
+        <rect width="128" height="104" rx="6" fill="none" stroke="#3a4356" stroke-width="5"/>
+        <line x1="64" y1="0" x2="64" y2="104" stroke="#3a4356" stroke-width="4"/><line x1="0" y1="52" x2="128" y2="52" stroke="#3a4356" stroke-width="4"/>
+      </g>
+      <!-- reminders: notes on a cork board -->
+      <g transform="translate(30,166)">
+        <rect width="150" height="122" rx="6" fill="#3b2f25" stroke="#4d3d30" stroke-width="3"/>
+        <foreignObject x="6" y="6" width="138" height="110"><div xmlns="http://www.w3.org/1999/xhtml" id="notes"></div></foreignObject>
+      </g>
+      <!-- lists (shopping, to-do ...): a notepad under the reminders -->
+      <g transform="translate(30,300)">
+        <rect width="150" height="128" rx="5" fill="#f3ecd2" stroke="#cfc39c" stroke-width="2"/>
+        <rect width="150" height="12" rx="5" fill="#d9534f" opacity=".85"/>
+        <foreignObject x="9" y="16" width="134" height="108"><div xmlns="http://www.w3.org/1999/xhtml" id="lists"></div></foreignObject>
+      </g>
+      <!-- the lamp's light -->
+      <ellipse id="pool" cx="300" cy="332" rx="175" ry="26" fill="url(#gPool)" opacity="0"/>
+      <path id="cone" d="M262 104 L338 104 L440 330 L160 330 Z" fill="url(#gCone)" opacity="0"/>
+      <!-- sofa -->
+      <g fill="#273044"><rect x="208" y="244" width="184" height="54" rx="14"/><rect x="194" y="262" width="32" height="52" rx="10"/>
+        <rect x="374" y="262" width="32" height="52" rx="10"/><rect x="214" y="282" width="172" height="28" rx="8" fill="#303b52"/>
+        <rect x="216" y="312" width="8" height="8"/><rect x="376" y="312" width="8" height="8"/></g>
+      <!-- pendant lamp -->
+      <line x1="300" y1="-40" x2="300" y2="64" stroke="#3a4356" stroke-width="2"/>
+      <circle id="halo" cx="300" cy="100" r="48" fill="url(#gHalo)" opacity="0"/>
+      <path d="M272 64 H328 L346 100 H254 Z" fill="#2f384b" stroke="#465069" stroke-width="1.5"/>
+      <circle id="bulb" cx="300" cy="104" r="9" fill="#2a303c"/>
+      <text id="lampTxt" class="lbl" x="300" y="366" text-anchor="middle">Lights off</text>
+      <!-- thermostat -->
+      <g transform="translate(528,82)">
+        <circle r="44" fill="#1b212d" stroke="#2b3344" stroke-width="2"/>
+        <circle r="34" fill="none" stroke="#2b3344" stroke-width="7" pathLength="100" stroke-dasharray="75 100" transform="rotate(135)" stroke-linecap="round"/>
+        <circle id="tArc" r="34" fill="none" stroke="#3ddc84" stroke-width="7" pathLength="100" stroke-dasharray="0 100" transform="rotate(135)" stroke-linecap="round"/>
+        <text id="tTxt" y="6" text-anchor="middle" class="val">--</text>
+        <text id="tMode" y="22" text-anchor="middle" class="sub">comfort</text>
+      </g>
+      <!-- timer clock + alarms -->
+      <g transform="translate(440,180)"><g id="clock">
+        <circle r="36" fill="#1b212d" stroke="#2b3344" stroke-width="2"/>
+        <circle r="28" fill="none" stroke="#2b3344" stroke-width="5"/>
+        <circle id="tmArc" r="28" fill="none" stroke="#b07aff" stroke-width="5" pathLength="100" stroke-dasharray="0 100" transform="rotate(-90)" stroke-linecap="round"/>
+        <text id="tmTxt" y="4" text-anchor="middle" class="val small">--:--</text>
+        <text id="tmLbl" y="18" text-anchor="middle" class="sub">no timer</text>
+      </g></g>
+      <text id="alarmTxt" class="lbl" x="440" y="232" text-anchor="middle"></text>
+      <!-- ringing: the clock itself rings (wiggles, red pulse) with a small Stop under it -->
+      <g id="ringStop" transform="translate(440,246)" role="button" aria-label="Stop">
+        <rect x="-34" y="-14" width="68" height="28" rx="14" fill="#d9534f"/>
+        <text y="5" text-anchor="middle" fill="#fff" style="font: 700 14px system-ui, sans-serif">Stop</text>
+      </g>
+      <!-- the pretend phone on a side table (its screen lights during a call or a text) -->
+      <g transform="translate(418,286)">
+        <rect x="0" y="10" width="56" height="7" rx="3" fill="#2f384b"/><rect x="6" y="17" width="5" height="15" fill="#273044"/>
+        <rect x="45" y="17" width="5" height="15" fill="#273044"/>
+        <g id="phoneSmall"><rect x="17" y="-16" width="20" height="27" rx="4" fill="#1b212d" stroke="#465069" stroke-width="1.5"/>
+          <rect class="scr" x="20" y="-12" width="14" height="18" rx="2" fill="#2a303c"/></g>
+      </g>
+      <!-- speaker -->
+      <g transform="translate(508,250)">
+        <g id="waves" fill="none" stroke="#7aa2ff" stroke-width="2.5" stroke-linecap="round">
+          <path d="M-8 34 Q-16 48 -8 62"/><path d="M-18 28 Q-30 48 -18 68"/><path d="M-28 22 Q-44 48 -28 74"/></g>
+        <rect width="56" height="68" rx="8" fill="#232a38" stroke="#323b4e" stroke-width="2"/>
+        <circle cx="28" cy="20" r="8" fill="#151a24" stroke="#3a4356"/><circle cx="28" cy="46" r="14" fill="#151a24" stroke="#3a4356"/>
+        <circle id="cone2" cx="28" cy="46" r="5" fill="#3a4356"/>
+      </g>
+      <g id="volBars" transform="translate(507,332)"></g>
+      <text id="trackTxt" class="lbl" x="536" y="372" text-anchor="middle">Music off</text>
+    </svg>
+    <div id="phone" hidden aria-live="polite"></div>
+  </section>
+</section>
+<div id="ring" hidden><div class="big" id="ringTxt"></div><button id="stopRing">Stop</button></div>
+<script>
+const $ = id => document.getElementById(id);
+let ws, pageV = null, appFrame = null, speaking = false, lastLevel = 0;
+
+function setStatus(s){ document.body.dataset.s = s;
+  const av = typeof views !== "undefined" && views.get(activeId);       // Elkit talks over the video: dip it
+  if (av && av.kind === "video"){ av.yt.duck = s === "speaking"; ytCmd(av, "setVolume", [av.yt.duck ? Math.min(av.yt.vol, 25) : av.yt.vol]); }
+  speaking = s === "speaking"; if (!speaking) $("pulse").querySelector(".core").style.transform = ""; }
+function level(db){                                    // the core swells with the voice
+  if (!speaking) return;
+  const k = Math.max(0, Math.min(1, (db + 55) / 40));
+  lastLevel = lastLevel * 0.5 + k * 0.5;
+  $("pulse").querySelector(".core").style.transform = `scale(${1 + lastLevel * 0.45})`;
+}
+let hearK = 0, hearT = null;
+function hear(on){                                     // you are talking: the halo comes up
+  document.body.classList.toggle("hear", on);
+  if (!on){ clearInterval(hearT); hearT = setInterval(() => {         // let it fade, not snap off
+    hearK *= 0.7; $("pulse").style.setProperty("--hear", hearK.toFixed(3));
+    if (hearK < 0.02){ hearK = 0; $("pulse").style.setProperty("--hear", 0); clearInterval(hearT); } }, 50); }
+  else clearInterval(hearT);
+}
+function mic(db){                                      // ...and follows your voice
+  if (!document.body.classList.contains("hear")) return;
+  const k = Math.max(0, Math.min(1, (db + 55) / 35));
+  hearK = hearK * 0.55 + k * 0.45;
+  $("pulse").style.setProperty("--hear", hearK.toFixed(3));
+}
+// ---- your voice as a small waveform under the name (mic levels come ~16 a second while you talk) ----
+const WV = {bars: new Array(37).fill(0), tint: null, tintT: 0, raf: 0, last: 0};
+function waveMic(db){ WV.bars.push(Math.max(0, Math.min(1, (db + 55) / 35))); WV.bars.shift(); waveRun(); }
+function waveTint(ok){ WV.tint = ok ? "126,226,168" : "124,134,150"; WV.tintT = performance.now();
+  const w = $("wave"); w.classList.remove("got", "skip"); void w.offsetWidth; w.classList.add(ok ? "got" : "skip");
+  setTimeout(() => w.classList.remove("got", "skip"), 1100); waveRun(); }
+const waveRaf = window.requestAnimationFrame ? f => window.requestAnimationFrame(f) : f => setTimeout(() => f(performance.now()), 33);
+function waveRun(){ if (!WV.raf) WV.raf = waveRaf(waveDraw); }
+function waveDraw(now){
+  WV.raf = 0;
+  const c = $("wave"), g = c && c.getContext && c.getContext("2d");
+  if (!g) return;                                      // no canvas (test page): nothing to draw
+  const W = c.width, H = c.height, mid = H / 2;
+  const talking = document.body.classList.contains("hear");
+  if (!talking){                                       // you stopped: the bars sink back to the line
+    const dt = Math.min(0.1, (now - (WV.last || now)) / 1000);
+    for (let i = 0; i < WV.bars.length; i++) WV.bars[i] *= Math.pow(0.02, dt);
+  }
+  WV.last = now;
+  const tk = WV.tint ? Math.max(0, 1 - (now - WV.tintT) / 1100) : 0;
+  const rgb = tk > 0 ? WV.tint : "122,162,255";
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = `rgba(${rgb},${0.25 + 0.15 * tk})`; g.fillRect(0, mid - 1, W, 2);      // the resting line
+  const bw = 5, gap = 3, n = WV.bars.length, x0 = (W - n * (bw + gap) + gap) / 2;
+  g.fillStyle = `rgba(${rgb},${0.9})`;
+  let live = tk > 0;
+  for (let i = 0; i < n; i++){
+    const k = WV.bars[i], h = Math.max(2, k * (H - 6) * (0.45 + 0.55 * i / n));     // older bars a little smaller
+    if (k > 0.01) live = true;
+    const x = x0 + i * (bw + gap);
+    g.beginPath(); g.roundRect ? g.roundRect(x, mid - h / 2, bw, h, 2.5) : g.rect(x, mid - h / 2, bw, h); g.fill();
+  }
+  if (live || talking) waveRun(); else { WV.tint = null; }
+}
+waveRun();
+function caught(ignored){                              // your words arrived: a ring pulled into the core
+  const c = $("pulse").querySelector(".catch");
+  c.classList.remove("got", "skip"); void c.offsetWidth; c.classList.add(ignored ? "skip" : "got");
+}
+function note(text){ $("note").textContent = text; $("note").classList.toggle("on", !!text); }
+
+// ---- Interface sub-tabs: the agent sends the list ({type:"views"}) and which one shows; each keeps its own frame,
+// so a game keeps its state and a video its place while another tab shows ----
+const views = new Map();            // id -> {id, kind, el, frame, data, yt, phI}
+let activeId = null;
+function send(m){ if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function ytCmd(v, func, args){ try { v.frame.contentWindow.postMessage(JSON.stringify({event:"command", func, args: args || []}), "*"); } catch (e) {} }
+function report(v, state){ if (v.yt.state !== state){ v.yt.state = state; send({type:"media", state, view: v.id}); } }
+function loadApp(v){
+  const u = v.data.url;
+  v.frame.classList.remove("updating");
+  v.frame.onload = () => { if (appFrame === v.frame) focusApp(); };
+  v.frame.src = u + (u.includes("?") ? "&" : "?") + "v=" + Date.now();
+}
+// keys go to the game on screen: the keyboard focus moves into it when it is shown, and a key that still lands on
+// this page (after a tap on a tab, say) is passed on to it, so Space flaps the bird and never presses a button here
+function focusApp(){ try { if (appFrame && !appFrame.hidden) appFrame.contentWindow.focus(); } catch (e) {} }
+const GAME_KEYS = /^(Space|Arrow(Up|Down|Left|Right)|Key[A-Z]|Enter|Digit\d)$/;
+for (const type of ["keydown", "keyup"]) document.addEventListener(type, e => {
+  if (!appFrame || !$("empty").hidden || !GAME_KEYS.test(e.code) || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  let doc; try { doc = appFrame.contentDocument; } catch (_) { return; }
+  if (!doc) return;
+  e.preventDefault();
+  const tgt = doc.activeElement && doc.activeElement !== doc.body ? doc.activeElement : (doc.body || doc.documentElement || doc);
+  const win = doc.defaultView || appFrame.contentWindow;
+  if (!win || !win.KeyboardEvent) return;
+  tgt.dispatchEvent(new win.KeyboardEvent(type, {key: e.key, code: e.code, keyCode: e.keyCode,
+    which: e.which, repeat: e.repeat, bubbles: true, cancelable: true}));
+  if (type === "keydown") focusApp();
+});
+function drawPhoto(v){
+  const ps = v.data.photos || [], p = ps[v.phI] || ps[0]; if (!p) return;
+  const img = v.el.querySelector("img"), cap = v.el.querySelectorAll(".cap span");
+  img.src = p.url; img.alt = p.title || "";
+  img.onerror = () => { if (p.thumb && img.src !== p.thumb) img.src = p.thumb; };
+  cap[0].textContent = [p.title, p.creator && "by " + p.creator, p.license && "(" + p.license.toUpperCase() + ")"].filter(Boolean).join(" ");
+  cap[1].textContent = ps.length > 1 ? `${v.phI + 1} / ${ps.length}` : "";
+}
+function drawLinks(v){
+  const d = v.data;
+  if (d.status){                                   // a web search: the summary page
+    const box = document.createElement("div"); box.className = "sum";
+    const q = document.createElement("div"); q.className = "q"; q.textContent = "Search summary";
+    const h = document.createElement("h2"); h.textContent = d.title || "Results";
+    box.append(q, h);
+    if (d.status === "loading"){
+      const w = document.createElement("div"); w.className = "wait"; w.innerHTML = "<i></i><i></i><i></i>";
+      const t = document.createElement("div"); t.className = "src"; t.textContent = "Reading the results…";
+      box.append(w, t);
+    } else {
+      if (d.summary){ const p = document.createElement("p"); p.className = "lead"; p.textContent = d.summary; box.append(p); }
+      if ((d.points || []).length){
+        const k = document.createElement("h5"); k.textContent = "Key points";
+        const ol = document.createElement("ol");
+        for (const pt of d.points){ const li = document.createElement("li"); li.textContent = pt; ol.append(li); }
+        box.append(k, ol);
+      }
+      if (!d.summary && !(d.points || []).length){ const p = document.createElement("p"); p.className = "lead"; p.textContent = "The results did not say much about this."; box.append(p); }
+    }
+    if ((d.sources || []).length){ const s = document.createElement("div"); s.className = "src"; s.textContent = "Sources: " + d.sources.join(" · "); box.append(s); }
+    v.el.textContent = ""; v.el.append(box);
+    return;
+  }
+  const ul = v.el.querySelector("ul"); ul.textContent = "";
+  v.el.querySelector("h4").textContent = v.data.title ? "Results for: " + v.data.title : "Results";
+  (v.data.items || []).forEach((it, n) => {
+    let host = ""; try { host = new URL(it.link).hostname.replace(/^www\./, ""); } catch (e) { return; }
+    const a = document.createElement("a"); a.href = it.link; a.target = "_blank"; a.rel = "noopener";
+    const b = document.createElement("b"), sm = document.createElement("small"), sn = document.createElement("span"), num = document.createElement("span");
+    num.className = "n"; num.textContent = n + 1; b.append(num, document.createTextNode(it.title));
+    sm.textContent = (it.source ? it.source + " · " : "") + host; sn.textContent = it.snippet || "";
+    a.append(b, sm); if (it.snippet) a.append(sn);
+    const li = document.createElement("li"); li.append(a); ul.append(li);
+  });
+}
+function makeView(d){
+  const el = document.createElement("div"); el.className = "view " + (d.kind === "page" ? "app page" : d.kind); el.hidden = true;
+  const v = {id: d.id, kind: d.kind, el, data: d, frame: null};
+  if (d.kind === "app" || d.kind === "page"){
+    v.frame = document.createElement("iframe"); v.frame.title = d.title || d.label; el.append(v.frame); loadApp(v);
+  } else if (d.kind === "video"){
+    v.yt = {state: "", vol: 100, muted: false, time: 0, duck: false};
+    v.frame = document.createElement("iframe"); v.frame.title = d.title || "Video";
+    v.frame.allow = "autoplay; encrypted-media; fullscreen; picture-in-picture"; v.frame.allowFullscreen = true;
+    v.frame.referrerPolicy = "strict-origin-when-cross-origin";
+    v.frame.addEventListener("load", () => {
+      try { v.frame.contentWindow.postMessage(JSON.stringify({event:"listening", id: v.id, channel:"widget"}), "*"); } catch (e) {}
+    });
+    v.frame.src = `https://www.youtube.com/embed/${encodeURIComponent(d.video_id)}?autoplay=1&enablejsapi=1&playsinline=1&rel=0` +
+                  `&origin=${encodeURIComponent(location.origin)}`;
+    el.append(v.frame);
+    v.timer = setTimeout(() => { if (v.yt.state !== "playing" && activeId === v.id) note("Tap the video to start it"); }, 4000);
+  } else if (d.kind === "photos"){
+    el.innerHTML = '<img alt=""><div class="cap"><span></span><span></span></div>'; v.phI = d.i || 0; drawPhoto(v);
+  } else if (d.kind === "links"){
+    el.innerHTML = '<h4></h4><ul></ul>'; drawLinks(v);
+  }
+  $("views").append(el); views.set(d.id, v);
+  return v;
+}
+function dropView(v){
+  if (v.kind === "video"){ clearTimeout(v.timer); report(v, "closed"); v.frame.src = "about:blank"; }
+  v.el.remove(); views.delete(v.id);
+}
+function renderViews(m){
+  const list = m.views || [], keep = new Set(list.map(d => d.id));
+  for (const v of [...views.values()]) if (!keep.has(v.id)) dropView(v);
+  for (const d of list){
+    const v = views.get(d.id);
+    if (!v){ makeView(d); continue; }
+    const old = v.data; v.data = d;
+    if ((d.kind === "app" || d.kind === "page") && (d.v !== old.v || d.url !== old.url)) loadApp(v);
+    else if (d.kind === "photos" && d.photos !== old.photos){ v.phI = d.i || 0; drawPhoto(v); }
+    else if (d.kind === "links") drawLinks(v);
+  }
+  const bar = $("sub"); bar.textContent = "";
+  for (const d of list){
+    const b = document.createElement("button");
+    b.className = "k-" + (d.kindword || d.kind) + (d.id === m.active ? " on" : "");
+    b.dataset.tab = tabOf(d);
+    b.textContent = d.label; b.onclick = () => send({type:"view", id: d.id});
+    bar.append(b);
+  }
+  activate(m.active);
+  tab(m.active != null ? tabOf(views.get(m.active).data) : curTab);
+}
+// slides, documents and spreadsheets live in Virtual Office; games, websites, videos, photos, links in Interface
+const OFFICE = new Set(["slides", "doc", "sheet"]);
+const OFFICE_WORDS = /\b(slides?|presentation|deck|ppt|powerpoint|document|doc|report|letter|resume|cv|memo|essay|spreadsheet|sheet|budget|invoice|table)\b/i;
+function tabOf(d){ return d && OFFICE.has(d.kindword) ? "office" : "design"; }
+let curTab = "design";
+// show the active item if it belongs to the tab on screen, else this tab's empty text
+function showActive(){
+  const a = views.get(activeId), here = !!a && tabOf(a.data) === curTab;
+  for (const v of views.values()) v.el.hidden = !(here && v.id === activeId);
+  $("empty").hidden = here;
+  appFrame = here && (a.kind === "app" || a.kind === "page") ? a.frame : null;
+  focusApp();
+  if (!here && !$("bar").classList.contains("on"))
+    $("empty").textContent = curTab === "office" ? "Virtual Office: ask for slides, a document or a spreadsheet." : "Elkit is listening.";
+}
+// a tap on a tab: show that tab's newest item if the one showing belongs to the other tab
+function pickHere(){
+  const a = views.get(activeId); if (a && tabOf(a.data) === curTab) return;
+  const mine = [...views.values()].filter(v => tabOf(v.data) === curTab);
+  if (mine.length) send({type:"view", id: mine[mine.length - 1].id});
+}
+function activate(id){
+  const prev = views.get(activeId);
+  if (prev && prev.id !== id && prev.kind === "video" && prev.yt.state === "playing") ytCmd(prev, "pauseVideo");
+  activeId = views.has(id) ? id : null;
+  for (const v of views.values()) v.el.hidden = v.id !== activeId;
+  $("empty").hidden = activeId !== null;
+  const a = views.get(activeId);
+  appFrame = a && (a.kind === "app" || a.kind === "page") ? a.frame : null;
+  focusApp();
+  const btn = $("sub").querySelector(".on"); if (btn) btn.scrollIntoView({inline: "nearest", block: "nearest"});
+  note("");
+}
+window.addEventListener("message", e => {
+  let host = ""; try { host = new URL(e.origin).hostname; } catch (err) { return; }
+  if (!/youtube(-nocookie)?\.com$/.test(host)) return;
+  const v = [...views.values()].find(x => x.kind === "video" && x.frame.contentWindow === e.source); if (!v) return;
+  let d; try { d = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch (err) { return; }
+  if (!d || (d.event !== "onStateChange" && !(d.event === "infoDelivery" && d.info && "playerState" in d.info))) return;
+  const st = typeof d.info === "number" ? d.info : d.info.playerState;
+  if (d.info && typeof d.info === "object"){
+    if (typeof d.info.currentTime === "number") v.yt.time = d.info.currentTime;
+    if (typeof d.info.muted === "boolean") v.yt.muted = d.info.muted;
+    if (typeof d.info.volume === "number" && !v.yt.duck) v.yt.vol = d.info.volume;
+  }
+  const name = {1:"playing", 2:"paused", 0:"ended"}[st];
+  if (name){ report(v, name); if (name === "playing" && activeId === v.id) note(""); }
+});
+function setVol(v, n){
+  v.yt.vol = Math.max(0, Math.min(100, Math.round(n))); ytCmd(v, "setVolume", [v.yt.vol]);
+  if (v.yt.muted && v.yt.vol > 0){ ytCmd(v, "unMute"); v.yt.muted = false; }
+  note(`Volume ${v.yt.vol}%`); setTimeout(() => note(""), 1500);
+}
+function videoCmd(m){
+  const v = views.get(m.view); if (!v) return;
+  if (v.kind === "photos"){ v.phI = typeof m.i === "number" ? m.i : v.phI; drawPhoto(v); return; }
+  if (v.kind !== "video") return;
+  const a = m.action, secs = m.seconds || 10;
+  if (a === "pause") ytCmd(v, "pauseVideo");
+  else if (a === "resume") ytCmd(v, "playVideo");
+  else if (a === "mute"){ ytCmd(v, "mute"); v.yt.muted = true; }
+  else if (a === "unmute"){ ytCmd(v, "unMute"); v.yt.muted = false; }
+  else if (a === "louder") setVol(v, v.yt.vol + 20);
+  else if (a === "quieter") setVol(v, v.yt.vol - 20);
+  else if (a === "volume" && typeof m.level === "number") setVol(v, m.level);
+  else if (a === "forward") ytCmd(v, "seekTo", [v.yt.time + secs, true]);
+  else if (a === "back") ytCmd(v, "seekTo", [Math.max(0, v.yt.time - secs), true]);
+  else if (a === "restart"){ ytCmd(v, "seekTo", [0, true]); ytCmd(v, "playVideo"); }
+}
+
+// ---- hands-free: voice "go to contact", "click send", "scroll down", "type Juan in name", "press space" ----
+// The apps come from this same server, so the page can find things inside them by their visible names.
+const CLICKABLE = 'a[href],button,[role=tab],[role=button],[role=link],[role=menuitem],[onclick],input[type=submit],' +
+                  'input[type=button],summary,label[for],[data-tab],[data-target],[data-page],[data-section],nav li';
+const FIELDS = 'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=checkbox]):not([type=radio]),' +
+               'textarea,select,[contenteditable=true]';
+const KEYS = {space:[" ","Space",32], spacebar:[" ","Space",32], enter:["Enter","Enter",13], "return":["Enter","Enter",13],
+  up:["ArrowUp","ArrowUp",38], down:["ArrowDown","ArrowDown",40], left:["ArrowLeft","ArrowLeft",37],
+  right:["ArrowRight","ArrowRight",39], escape:["Escape","Escape",27], esc:["Escape","Escape",27], tab:["Tab","Tab",9]};
+const stem = w => w.length > 3 ? w.replace(/(ies)$/, "y").replace(/s$/, "") : w;
+const nrm = t => (t || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter(Boolean).map(stem).join(" ");
+function navDoc(){ try { return appFrame && $("empty").hidden ? appFrame.contentDocument : null; } catch (e) { return null; } }
+function seen(el){
+  const r = el.getBoundingClientRect(), cs = el.ownerDocument.defaultView.getComputedStyle(el);
+  return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none";
+}
+function nameOf(el){
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) && !/^(submit|button)$/i.test(el.type)){   // a field: its label, not what is typed in it
+    const t = el.getAttribute("aria-label") || (el.labels && el.labels[0] && el.labels[0].innerText) ||
+              el.getAttribute("placeholder") || el.name || el.id || "";
+    return t.trim().split("\n")[0].slice(0, 60);
+  }
+  let t = el.getAttribute("aria-label") || el.innerText || el.value || el.title || el.getAttribute("alt") || "";
+  if (!t.trim() && el.labels && el.labels[0]) t = el.labels[0].innerText;
+  if (!t.trim()) t = el.getAttribute("placeholder") || el.name || el.id || "";
+  return t.trim().split("\n")[0].slice(0, 60);
+}
+function score(label, want){
+  const l = nrm(label), w = nrm(want);
+  if (!l || !w) return 0;
+  if (l === w) return 1;
+  if (l.startsWith(w + " ") || l.endsWith(" " + w)) return 0.85;
+  if (l.includes(w)) return 0.7;
+  const ws = w.split(" "), ls = new Set(l.split(" "));
+  return 0.6 * ws.filter(x => ls.has(x)).length / ws.length;
+}
+function best(doc, sel, want, extra){
+  let top = null, sc = 0;
+  for (const el of doc.querySelectorAll(sel)){
+    if (!seen(el)) continue;
+    const s = Math.max(score(nameOf(el), want), extra ? score(extra(el), want) * 0.95 : 0);
+    if (s > sc){ top = el; sc = s; }
+  }
+  return sc >= 0.5 ? top : null;
+}
+function options(doc){
+  const out = [];
+  for (const el of doc.querySelectorAll(CLICKABLE)){
+    const n = nameOf(el); if (n && seen(el) && !out.includes(n) && n.length < 40) out.push(n);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+function flash(el){
+  const o = el.style.outline, oo = el.style.outlineOffset;
+  el.style.outline = "3px solid #7aa2ff"; el.style.outlineOffset = "2px";
+  setTimeout(() => { el.style.outline = o; el.style.outlineOffset = oo; }, 900);
+}
+function scroller(doc){
+  const se = doc.scrollingElement || doc.documentElement;
+  if (se.scrollHeight > se.clientHeight + 4) return se;
+  let big = null, area = 0;
+  for (const el of doc.querySelectorAll("*")){
+    const cs = doc.defaultView.getComputedStyle(el);
+    if (/(auto|scroll)/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 4){
+      const a = el.clientWidth * el.clientHeight; if (a > area){ area = a; big = el; }
+    }
+  }
+  return big || se;
+}
+function press(doc, key){
+  const k = KEYS[key] || (key.length === 1 ? [key, "Key" + key.toUpperCase(), key.toUpperCase().charCodeAt(0)] : null);
+  if (!k) return false;
+  try { appFrame.contentWindow.focus(); } catch (e) {}
+  const target = doc.activeElement && doc.activeElement !== doc.body ? doc.activeElement : doc.body;
+  const ev = type => new (doc.defaultView.KeyboardEvent)(type, {key:k[0], code:k[1], keyCode:k[2], which:k[2], bubbles:true, cancelable:true});
+  target.dispatchEvent(ev("keydown"));
+  setTimeout(() => target.dispatchEvent(ev("keyup")), 90);
+  return true;
+}
+function setValue(el, text){
+  const win = el.ownerDocument.defaultView;
+  if (el.tagName === "SELECT"){
+    let pick = null, sc = 0;
+    for (const o of el.options){ const s = score(o.text, text); if (s > sc){ sc = s; pick = o; } }
+    if (!pick || sc < 0.5) return false;
+    el.value = pick.value;
+  } else if (el.isContentEditable){ el.textContent = text; }
+  else {
+    const proto = el.tagName === "TEXTAREA" ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
+  }
+  el.dispatchEvent(new win.Event("input", {bubbles:true})); el.dispatchEvent(new win.Event("change", {bubbles:true}));
+  el.focus(); return true;
+}
+function appNav(m){
+  const doc = navDoc(), act = m.action, want = (m.target || "").trim();
+  if (!doc || !doc.body) return {ok:false, did:"no app is on the screen"};
+  tab(tabOf((views.get(activeId) || {}).data));
+  if (act === "look"){
+    const heads = [...doc.querySelectorAll("h1,h2,h3")].filter(seen).map(h => h.innerText.trim()).filter(Boolean).slice(0, 10);
+    return {ok:true, did:"looked", title: doc.title, headings: heads, can_click: options(doc),
+            text: (doc.body.innerText || "").replace(/\s+/g, " ").trim().slice(0, 700)};
+  }
+  if (act === "scroll"){
+    const el = scroller(doc), d = el.clientHeight * 0.8;
+    const top = want === "top" ? 0 : want === "bottom" ? el.scrollHeight : el.scrollTop + (want === "up" ? -d : d);
+    el.scrollTo({top, behavior:"smooth"});
+    return {ok:true, did:"scrolled " + (want || "down")};
+  }
+  if (act === "press") return press(doc, want.toLowerCase()) ? {ok:true, did:"pressed " + want} : {ok:false, did:"unknown key " + want};
+  if (act === "back"){
+    if (doc.defaultView.location.hash){ doc.defaultView.history.back(); return {ok:true, did:"went back"}; }
+    const el = scroller(doc); if (el.scrollTop > 0){ el.scrollTo({top:0, behavior:"smooth"}); return {ok:true, did:"back to the top"}; }
+    return {ok:false, did:"there is no previous page"};
+  }
+  if (act === "type"){
+    let el = want ? best(doc, FIELDS, want) : null;
+    if (!el && !want) el = [...doc.querySelectorAll(FIELDS)].find(f => seen(f) && !f.value) || null;
+    if (!el) return {ok:false, did:"no field called " + want, fields: [...doc.querySelectorAll(FIELDS)].filter(seen).map(nameOf).slice(0, 12)};
+    if (!setValue(el, m.text || "")) return {ok:false, did:"could not choose " + m.text};
+    el.scrollIntoView({block:"center", behavior:"smooth"}); flash(el);
+    return {ok:true, did:`typed into ${nameOf(el) || "the field"}`};
+  }
+  if (!want) return {ok:false, did:"say what to " + (act === "click" ? "click" : "go to"), can_click: options(doc)};
+  // go_to / click: a link, tab or button by its name; go_to also finds a section by its heading or id
+  const el = best(doc, CLICKABLE, want, e => e.getAttribute("href") || e.dataset.tab || e.dataset.target || "");
+  if (el){
+    const href = el.getAttribute("href") || "";
+    const sec = href.startsWith("#") && href.length > 1 ? doc.getElementById(decodeURIComponent(href.slice(1))) : null;
+    flash(el);
+    if (sec){ sec.scrollIntoView({behavior:"smooth", block:"start"}); try { doc.defaultView.history.pushState(null, "", href); } catch (e) {} }
+    else el.click();
+    return {ok:true, did:(act === "click" ? "clicked " : "opened ") + nameOf(el)};
+  }
+  if (act === "go_to"){
+    const sec = best(doc, "h1,h2,h3,h4,section[id],[id]", want, e => e.id || "");
+    if (sec){ sec.scrollIntoView({behavior:"smooth", block:"start"}); flash(sec); return {ok:true, did:"went to " + (nameOf(sec) || want)}; }
+  }
+  return {ok:false, did:`nothing called ${want} on the screen`, can_click: options(doc)};
+}
+
+function showBuild(m){
+  const bar = $("bar");
+  if (!m.building){
+    bar.style.width = "100%"; setTimeout(() => { bar.classList.remove("on", "wait"); bar.style.width = "0"; }, 500);
+    if (appFrame) appFrame.classList.remove("updating");
+    $("empty").textContent = "Elkit is listening.";
+    note(""); return;
+  }
+  if (appFrame){ appFrame.classList.add("updating"); try { appFrame.contentWindow.postMessage({type:"fda_pause"}, "*"); } catch (e) {} }
+  else $("empty").textContent = "Sketching " + (m.title || "your idea") + "…";
+  const pct = Math.min(97, Math.round(100 * (m.chars || 0) / (m.expect || 3500)));
+  bar.classList.add("on"); bar.classList.toggle("wait", !m.chars);
+  if (m.chars) bar.style.width = pct + "%";
+  note((m.kind === "edit" ? "Updating " : "Building ") + (m.title || "your design") + (m.chars ? ` · ${pct}%` : ""));
+}
+
+// ---- Room tab: hidden until asked for ("show me the lights") or a room tool is used ----
+// warm and cool must look clearly different on the dark wall: warm = amber, cool = icy blue (pure white looks grey)
+const COLORS = {"warm white":"#ffc477","cool white":"#a9ccff","white":"#f4f1ea","neutral white":"#f4f1ea","red":"#ff4d4d",
+  "green":"#3ddc84","blue":"#4d8bff","yellow":"#ffe14d","orange":"#ff9f40","purple":"#a66bff","pink":"#ff7ac6","cyan":"#4de1ff",
+  "magenta":"#ff4dff","violet":"#9a6bff","teal":"#2bc4b4"};
+// what people (and the LLM) call the two tones: "cool", "cold", "daylight", "warm tone", "soft white", "candle"...
+function lightColor(name){
+  const n = String(name || "").toLowerCase().trim();
+  if (COLORS[n]) return COLORS[n];
+  if (/^#[0-9a-f]{6}$/i.test(n)) return n;
+  if (/\b(cool|cold|cooler|colder|daylight|day light|icy|ice|bluish|crisp)\b/.test(n)) return COLORS["cool white"];
+  if (/\b(warm|warmer|soft|candle|candlelight|cozy|cosy|amber|sunset|yellowish)\b/.test(n)) return COLORS["warm white"];
+  if (/\bneutral|natural|plain\b/.test(n)) return COLORS["neutral white"];
+  for (const k of Object.keys(COLORS)) if (new RegExp("\\b" + k + "\\b").test(n)) return COLORS[k];   // "light blue" -> blue
+  try {                                         // any other CSS colour name ("lavender", "gold")
+    const cx = document.createElement("canvas").getContext("2d"); cx.fillStyle = "#000001"; cx.fillStyle = n;
+    if (cx.fillStyle !== "#000001") return cx.fillStyle;
+  } catch (e) {}
+  return COLORS["warm white"];
+}
+let room = null;
+function act(action){ if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:"action", action})); }
+function tab(t, tapped){
+  t = t === "room" || t === "office" ? t : "design";
+  const changed = t !== curTab; curTab = t;
+  const r = t === "room";
+  $("room").hidden = !r; $("stage").hidden = r;
+  $("tRoom").classList.toggle("on", r); $("tDesign").classList.toggle("on", t === "design");
+  $("tOffice").classList.toggle("on", t === "office");
+  let n = 0;                                   // the sub-tab bar shows only this tab's items
+  for (const b of $("sub").children){ b.hidden = b.dataset.tab !== t; n += !b.hidden; }
+  $("sub").hidden = r || !n;
+  if (!r) showActive();
+  if (tapped || changed) send({type:"tab", tab: t});      // the agent knows which tab is on screen
+}
+function fmt(s){ const m = Math.floor(s/60), r = s%60; return `${m}:${String(r).padStart(2,"0")}`; }
+function li(a, b){ const l = document.createElement("li"); l.innerHTML = "<span></span><span class='muted'></span>";
+  l.children[0].textContent = a; l.children[1].textContent = b || ""; return l; }
+// the room as a picture: the lamp lights the room in its colour, the thermostat dial, the timer clock,
+// the speaker (sound waves while music plays, volume bars), reminders as notes on the board, the sky by the hour
+function hex2rgb(h){ const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h || ""); return m ? [1,2,3].map(i => parseInt(m[i], 16)) : [255,213,154]; }
+function mix(a, b, k){ const A = hex2rgb(a), B = hex2rgb(b); return "rgb(" + A.map((v, i) => Math.round(v + (B[i] - v) * k)).join(",") + ")"; }
+let timerEnd = 0, timerTotal = 0, timerLabel = "";
+const RING_OVERLAY = false;          // the old full-screen red "ringing" screen (kept, switched off)
+let ringing = "";
+function drawTimer(){
+  if (ringing){ $("tmTxt").textContent = "0:00"; $("tmLbl").textContent = /alarm/i.test(ringing) ? "alarm" : "time's up"; return; }
+  const left = Math.max(0, Math.round((timerEnd - Date.now()) / 1000));
+  $("tmArc").style.opacity = timerEnd ? 1 : 0;
+  if (!timerEnd){ $("tmTxt").textContent = "--:--"; $("tmLbl").textContent = "no timer"; $("tmArc").style.strokeDasharray = "0 100"; return; }
+  $("tmTxt").textContent = fmt(left); $("tmLbl").textContent = (timerLabel || "timer").slice(0, 12);
+  $("tmArc").style.strokeDasharray = `${timerTotal ? 100 * left / timerTotal : 0} 100`;
+}
+function drawSky(){
+  const h = new Date().getHours() + new Date().getMinutes() / 60;
+  const day = h >= 6 && h < 17.5, dusk = (h >= 17.5 && h < 19) || (h >= 5 && h < 6);
+  $("sky").style.fill = day ? "#7ec8ff" : dusk ? "#f39a6b" : "#0d1b3a";
+  $("sun").style.fill = day || dusk ? "#ffe08a" : "#dfe6f5";                       // the sun, or the moon at night
+  $("sun").setAttribute("cy", day ? 26 : dusk ? 46 : 28);
+  $("stars").style.opacity = day ? 0 : dusk ? .3 : 1;
+}
+setInterval(drawTimer, 500); setInterval(drawSky, 60000); drawSky();
+function renderRoom(s){
+  if (!s || !s.lights) return;
+  room = s;
+  const L = s.lights, on = L.power === "on", c = lightColor(L.color);
+  const k = on ? Math.max(0.05, (L.brightness || 0) / 100) : 0;
+  document.querySelectorAll("#scene .lc").forEach(st => st.style.stopColor = c);
+  $("bulb").style.fill = on ? c : "#2a303c";
+  $("halo").style.opacity = on ? 0.35 + 0.65 * k : 0;
+  $("cone").style.opacity = on ? 0.15 + 0.6 * k : 0;
+  $("pool").style.opacity = on ? 0.2 + 0.8 * k : 0;
+  $("wall").style.fill = on ? mix("#12161f", c, 0.08 + 0.2 * k) : "#12161f";
+  $("floor").style.fill = on ? mix("#0c0f15", c, 0.05 + 0.12 * k) : "#0c0f15";
+  $("room").style.background = `linear-gradient(${$("wall").style.fill} 0 67%, ${$("floor").style.fill} 67%)`;
+  $("lampTxt").textContent = on ? `Lights ${L.brightness}% · ${L.color}` : "Lights off";
+  const t = +s.thermostat_c, f = Math.max(0, Math.min(1, (t - 16) / 16));
+  const tc = t <= 21 ? "#4da3ff" : t >= 27 ? "#ff9f40" : "#3ddc84";
+  $("tArc").style.strokeDasharray = `${75 * f} 100`; $("tArc").style.stroke = tc;
+  $("tTxt").textContent = `${t}°`; $("tMode").textContent = t <= 21 ? "cooling" : t >= 27 ? "heating" : "comfort";
+  const m = s.music || {state: "stopped"};
+  $("waves").classList.toggle("on", m.state === "playing");
+  $("cone2").style.fill = m.state === "playing" ? "#7aa2ff" : "#3a4356";
+  const tr = m.state === "stopped" ? "Music off" : (m.state === "paused" ? "Paused · " : "♪ ") + (m.track || "");
+  $("trackTxt").textContent = tr.length > 24 ? tr.slice(0, 23) + "…" : tr;
+  const vb = $("volBars"), n = Math.ceil((s.volume || 0) / 20); vb.textContent = "";
+  for (let i = 0; i < 5; i++){
+    const r = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const h = 6 + i * 3.5; r.setAttribute("x", i * 12); r.setAttribute("y", 20 - h); r.setAttribute("width", 8); r.setAttribute("height", h);
+    r.setAttribute("rx", 1.5); r.setAttribute("fill", i < n ? "#7aa2ff" : "#2b3344"); vb.append(r);
+  }
+  const tm = (s.timers || [])[0];
+  if (tm){ timerEnd = Date.now() + tm.left * 1000; timerTotal = tm.seconds; timerLabel = tm.label; } else timerEnd = 0;
+  drawTimer();
+  $("alarmTxt").textContent = (s.alarms || []).length ? "⏰ " + s.alarms.map(a => a.time).join(", ") : "";
+  const N = $("notes"); N.textContent = "";
+  for (const r of (s.reminders || []).slice(0, 4)){
+    const d = document.createElement("div"), tx = document.createElement("span"); d.className = "note"; tx.textContent = r.text; d.append(tx);
+    if (r.time){ const sm = document.createElement("small"); sm.textContent = r.time; d.prepend(sm); }
+    N.append(d);
+  }
+  if (!N.children.length){ const d = document.createElement("div"); d.className = "none"; d.textContent = "No reminders"; N.append(d); }
+  const Ls = $("lists"); Ls.textContent = "";
+  const full = Object.entries(s.lists || {}).filter(([, items]) => items.length);
+  const each = full.length > 1 ? 3 : 6;               // one list: 6 lines; two or more: 3 each (the pad is small)
+  for (const [name, items] of full.slice(0, 2)){
+    const h = document.createElement("h5"), ul = document.createElement("ul");
+    h.textContent = name + (items.length > each ? ` (${items.length})` : "");
+    for (const it of items.slice(0, each)){ const l = document.createElement("li"); l.textContent = it; ul.append(l); }
+    Ls.append(h, ul);
+  }
+  if (!Ls.children.length){ const d = document.createElement("div"); d.className = "none"; d.textContent = "No lists"; Ls.append(d); }
+  ringing = s.ringing || "";
+  $("ring").hidden = !(RING_OVERLAY && ringing); if (ringing) $("ringTxt").textContent = ringing;
+  $("clock").classList.toggle("ringing", !!ringing); $("ringStop").classList.toggle("on", !!ringing);
+  $("alarmTxt").style.display = ringing ? "none" : ""; drawTimer();
+  drawPhone(s.phone || {});
+}
+// the pretend phone: calling (rings, nobody answers) / no answer / ended / compose (MEX2's quick replies) / sent
+const PHONE_SVG = '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/></svg>';
+let phoneKey = "", phoneSince = 0, phoneState = "idle";
+function phEsc(t){ const d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+function avc(n){ return /^sister$/i.test(n) ? " sis" : /^brother$/i.test(n) ? " bro" : /^daddy$/i.test(n) ? " dad" : ""; }
+function drawPhone(p){
+  const P = $("phone"), st = p.state || "idle", on = st !== "idle";
+  $("phoneSmall").classList.toggle("on", on); $("phoneSmall").classList.toggle("ring", st === "calling");
+  phoneState = st; phoneSince = (p.since || 0) * 1000;
+  const key = JSON.stringify([st, p.contact, p.text, p.since, p.action]);
+  if (key === phoneKey) return;
+  phoneKey = key;
+  if (!on){ P.hidden = true; P.className = ""; return; }
+  const who = p.contact || "", ini = (who.trim()[0] || "?").toUpperCase(), dad = "";
+  const head = st === "contacts" ? `<div class="who">Contacts</div><div class="num">${p.action === "message" ? "Who to text?" : "Who to call?"}</div>`
+    : `<div class="av${dad}${avc(who)}"><i></i><i></i>${phEsc(ini)}</div><div class="who">${phEsc(who)}</div><div class="num">${phEsc(p.number || "")}</div>`;
+  let body = "";
+  if (st === "contacts") body = `<div class="people">` + (p.contacts || []).map((c, i) =>
+      `<button data-c="${phEsc(c)}"><b>${i + 1}</b><span class="mini${avc(c)}">${phEsc(c[0])}</span>${phEsc(c)}</button>`).join("") + `</div>`;
+  else if (st === "calling") body = `<div class="st">Calling…</div><div class="clock" id="phClock">0:00</div><button class="end" title="End call">${PHONE_SVG}</button>`;
+  else if (st === "no answer") body = `<div class="st bad">No answer</div><div class="hint">${phEsc(who)} didn't pick up</div>`;
+  else if (st === "ended") body = `<div class="st">Call ended</div>`;
+  else if (st === "compose") body = `<div class="hint">What should it say?</div><div class="quick">` +
+      (p.quick || []).map((q, i) => `<button data-q="${phEsc(q)}"><b>${i + 1}</b>${phEsc(q)}</button>`).join("") + `</div>`;
+  else if (st === "sent") body = `<div class="thread"><div class="bubble">${phEsc(p.text)}</div><div class="dlv">Delivered ✓</div></div>`;
+  P.className = st.replace(" ", "-"); P.innerHTML = head + body; P.hidden = false;
+  const end = P.querySelector(".end"); if (end) end.onclick = () => act({tool: "end_call"});
+  P.querySelectorAll(".people button").forEach(b => b.onclick = () => act({tool: p.action || "call", contact: b.dataset.c, text: ""}));
+  P.querySelectorAll(".quick button").forEach(b => b.onclick = () => act({tool: "message", contact: who, text: b.dataset.q}));
+  tickPhone();
+}
+function tickPhone(){
+  const c = $("phClock"); if (!c || phoneState !== "calling") return;
+  c.textContent = fmt(Math.max(0, Math.floor((Date.now() - phoneSince) / 1000)));
+}
+setInterval(tickPhone, 500);
+$("tDesign").onclick = () => { tab("design", true); pickHere(); };
+$("tRoom").onclick = () => tab("room", true);
+$("tOffice").onclick = () => { tab("office", true); pickHere(); };
+function stopRinging(){ $("ring").hidden = true; ringing = ""; $("clock").classList.remove("ringing");
+  $("ringStop").classList.remove("on"); $("alarmTxt").style.display = ""; drawTimer(); act({tool:"stop_ringing"}); }
+$("stopRing").onclick = stopRinging;
+$("ringStop").addEventListener("click", stopRinging);
+function showChoices(m){
+  const box = $("choices");
+  if (m.close || !m.options || !m.options.length){ box.hidden = true; return; }
+  $("chTitle").textContent = m.title || "Pick one";
+  const g = $("chGrid"); g.textContent = "";
+  for (const o of m.options){
+    const b = document.createElement("button"); b.className = "ch";
+    const n = document.createElement("span"); n.className = "n"; n.textContent = o.n; b.append(n);
+    if (o.img){ const im = new Image(); im.src = o.img; im.alt = o.label; b.append(im); }
+    else if (o.colors){                             // a colour scheme: a tiny web page in those colours
+      const c = o.colors, mk = document.createElement("div"); mk.className = "mock"; mk.style.background = c.background;
+      const hd = document.createElement("div"); hd.className = "hd"; hd.style.background = c.primary;
+      const bd = document.createElement("div"); bd.className = "bd";
+      const card = document.createElement("div"); card.className = "card"; card.style.background = c.surface; card.style.color = c.text;
+      const h = document.createElement("b"); h.style.color = c.primary; h.textContent = "Welcome";
+      card.append(h, document.createElement("br"), "Text looks like this");
+      const btn = document.createElement("span"); btn.className = "btn"; btn.style.background = c.accent; btn.style.color = c.surface;
+      btn.textContent = "Button"; bd.append(card, btn); mk.append(hd, bd); b.append(mk);
+    }
+    const l = document.createElement("div"); l.className = "lbl"; l.textContent = o.label; b.append(l);
+    b.onclick = () => { b.classList.add("on"); if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:"choice", n:o.n})); };
+    g.append(b);
+  }
+  box.hidden = false;
+}
+function demo(m){                                  // live view captions (only sent by tests/pc_watch.py)
+  if (m.off){ $("demo").hidden = true; return; }
+  $("demo").hidden = false;
+  if (m.scene !== undefined) $("dmScene").textContent = m.scene;
+  for (const [k, id] of [["you", "dmYou"], ["bot", "dmBot"]]){
+    if (m[k] === undefined) continue;
+    const el = $(id); el.querySelector("span").textContent = m[k]; el.classList.toggle("none", !m[k]);
+  }
+}
+function onMsg(m){
+  switch (m.type){
+    case "demo": demo(m); break;
+    case "choices": showChoices(m); break;
+    case "hello": if (pageV === null) pageV = m.v; else if (m.v !== pageV) location.reload(); break;
+    case "status": setStatus(m.status); break;
+    case "level": level(m.db); break;
+    case "voice": hear(m.on); waveRun(); break;
+    case "mic": mic(m.db); waveMic(m.db); break;
+    case "user": caught(!!m.ignored); waveTint(!m.ignored); break;
+    case "views": renderViews(m); break;
+    case "video_cmd": videoCmd(m); break;
+    case "app_nav": { let r; try { r = appNav(m); } catch (e) { r = {ok:false, did:"error: " + e.message}; }
+                      if (ws && ws.readyState === 1) ws.send(JSON.stringify({type:"app_result", id:m.id, ...r})); break; }
+    case "app_set": { const base = (m.url || "").split("?")[0];
+                      const v = [...views.values()].find(x => x.kind === "app" && x.data.url === base) || views.get(activeId);
+                      if (v && v.frame) v.frame.contentWindow.postMessage({type:"fda_set", patch:m.patch}, "*"); break; }
+    case "build": if (m.building) tab(OFFICE_WORDS.test(m.title || "") ? "office" : "design"); showBuild(m); break;
+    case "room": renderRoom(m.state); if (m.state && m.state.ringing) tab("room"); break;
+    case "tab": tab(m.tab); break;
+  }
+}
+function connect(){
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => $("conn").classList.remove("off");
+  ws.onclose = () => { $("conn").classList.add("off"); setStatus("offline");
+                       $("ring").hidden = true;                 // Elkit is gone: nothing can be ringing
+                       ringing = ""; $("clock").classList.remove("ringing"); $("ringStop").classList.remove("on");
+                       setTimeout(connect, 1500); };
+  ws.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch (err) {} };
+}
+connect();
+</script>
+</body>
+</html>
