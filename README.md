@@ -40,12 +40,12 @@ On the laptop / Pi: echo cancellation (WebRTC AEC3), voice activity (Silero VAD)
 | Agent harness with MCP support on the Pi | **Pipecat 1.15** pipeline (`fda/pc/agent.py`) with Pipecat's `MCPClient` |
 | MCP servers for SOTA ASR and TTS, run on the Pi | `fda/mcp_servers/asr_server.py` (`transcribe`) and `tts_server.py` (`synthesize`): own processes, MCP streamable HTTP on `127.0.0.1:8101` / `8102` |
 | VAD on the Pi | Silero VAD (Pipecat `VADProcessor`) + **Smart Turn v3** end-of-turn model (local ONNX) |
-| Full-duplex agent doing real-world tasks | FDA's audio engine as a Pipecat transport (`fda/pc/transport.py`: AEC3 + own-voice gate, mic and speaker open together), duck on overlap, ≥3 words to interrupt, backchannels ignored, resume after a false interruption; tools MCP server `tools_server.py` on `:8103` |
+| Full-duplex agent doing real-world tasks | FDA's audio engine as a Pipecat transport (`fda/pc/transport.py`: AEC3 + own-voice gate, mic and speaker open together), duck on overlap, â‰¥3 words to interrupt, backchannels ignored, resume after a false interruption; tools MCP server `tools_server.py` on `:8103` |
 
 ```
-mic ─► FDA audio engine (AEC3 + own-voice gate) ─► Silero VAD ─► DuplexGuard ─► STT ──MCP──► asr server (Groq Whisper, fallback Moonshine)
-     ─► HeardTap ─► user turn (Smart Turn v3) ─► LLM (Groq gpt-oss-120b, fallback gpt-oss-20b) ◄─MCP─► tools server
-     ─► NotForMe ("(silent)") ─► TTS ──MCP──► tts server (DGX3 Qwen3-TTS, fallback Piper) ─► FDA mixer ─► speaker
+mic â”€â–º FDA audio engine (AEC3 + own-voice gate) â”€â–º Silero VAD â”€â–º DuplexGuard â”€â–º STT â”€â”€MCPâ”€â”€â–º asr server (Groq Whisper, fallback Moonshine)
+     â”€â–º HeardTap â”€â–º user turn (Smart Turn v3) â”€â–º LLM (Groq gpt-oss-120b, fallback gpt-oss-20b) â—„â”€MCPâ”€â–º tools server
+     â”€â–º NotForMe ("(silent)") â”€â–º TTS â”€â”€MCPâ”€â”€â–º tts server (DGX3 Qwen3-TTS, fallback Piper) â”€â–º FDA mixer â”€â–º speaker
 ```
 
 **Tools (all free, no key):** `create_app`, `edit_app`, `undo_app_change`, `list_apps`, `open_app` (build games, websites
@@ -66,7 +66,7 @@ with "open Sky Hop" or edit it like any built app).
   ("Let me check that.") so a reply starts within ~1 s; questions about the time carry the true time to the LLM
 
 **Building apps by voice:** "make me a snake game", then "make the snake red", "undo that". The build runs in the background
-(you can keep talking), the app opens in the free lower-right area of the display (⛶ = full screen), and FDA says when
+(you can keep talking), the app opens in the free lower-right area of the display (â›¶ = full screen), and FDA says when
 it's ready. The coder is `qwen2.5-coder-3b` locally (snake game in 43 s on the laptop; several minutes on a Pi) or a
 free cloud tier (`coder_engine = "groq"`: seconds). A JavaScript syntax check (`node --check`, if Node.js is installed)
 sends errors back to the model for one repair round.
@@ -91,24 +91,24 @@ Measured on the laptop (offline, zero tokens): ASR over MCP 154 ms, TTS over MCP
 interrupt and app all pass.
 
 **Benchmark:** `fd-benchmark/assistant_entry.py` plugs this agent into fdbench's launcher (`launch_assistant.py --check`
-→ READY). Free local judge for the scores: `python -m fda judge` (Qwen2.5-3B on :8092, no key).
+â†’ READY). Free local judge for the scores: `python -m fda judge` (Qwen2.5-3B on :8092, no key).
 
 ## How a turn works (classic FDA, `python -m fda`)
 
 ```
-mic ─► AEC3 (removes FDA's own voice, ~48 dB) ─► Silero VAD + level detector
-         ▲ reference = exactly what the speaker plays (voice + music + alarms)
-         │
- 120 ms of silence ─► SPECULATIVE: transcript (Qwen2-Audio) ─► echo check ─► fast-path rules ─► planner (Qwen2-Audio, text)
- 300-500 ms silence ─► COMMIT: act + speak                     (user keeps talking → speculative work is cancelled)
+mic â”€â–º AEC3 (removes FDA's own voice, ~48 dB) â”€â–º Silero VAD + level detector
+         â–² reference = exactly what the speaker plays (voice + music + alarms)
+         â”‚
+ 120 ms of silence â”€â–º SPECULATIVE: transcript (Qwen2-Audio) â”€â–º echo check â”€â–º fast-path rules â”€â–º planner (Qwen2-Audio, text)
+ 300-500 ms silence â”€â–º COMMIT: act + speak                     (user keeps talking â†’ speculative work is cancelled)
 
- planner JSON {for_me, say, do} streams: say → TTS phrase by phrase; do → device agent / search agent / scheduler
+ planner JSON {for_me, say, do} streams: say â†’ TTS phrase by phrase; do â†’ device agent / search agent / scheduler
 ```
 
 **Interruptions (barge-in)** while FDA is talking:
-1. Your voice is detected (VAD or a level jump over the residual echo) → FDA's voice **ducks to 25 % in ~40 ms**.
-2. The early transcript decides: real words ("stop", "what time is it") → **fade out in 80 ms** and answer;
-   "uh huh", "yeah", "mm-hmm" → **volume comes back** and FDA keeps talking; FDA's own echo → ignored.
+1. Your voice is detected (VAD or a level jump over the residual echo) â†’ FDA's voice **ducks to 25 % in ~40 ms**.
+2. The early transcript decides: real words ("stop", "what time is it") â†’ **fade out in 80 ms** and answer;
+   "uh huh", "yeah", "mm-hmm" â†’ **volume comes back** and FDA keeps talking; FDA's own echo â†’ ignored.
 3. Talking over it for 1.5 s stops it even without a transcript.
 4. History keeps only what you actually heard: `"Once upon a time, there was a [interrupted]"`.
 5. If it stopped for something that turns out not to be for it, it **picks up where it left off**.
@@ -126,8 +126,8 @@ mic ─► AEC3 (removes FDA's own voice, ~48 dB) ─► Silero VAD + level dete
 | "Make the lights blue and set a timer for two minutes" (planner) | **596-850 ms**, both actions done |
 | Story, then "Stop. What time is it?" | ducks after **307-562 ms**, fades out at **~0.9-1.1 s**, answers the time |
 | "Uh huh" while FDA talks | keeps talking |
-| "Honey, did you remember to lock the front door…" | ignored (`for_me=false`) |
-| "Who is the current president of France?" | web search → "Emmanuel Macron" |
+| "Honey, did you remember to lock the front doorâ€¦" | ignored (`for_me=false`) |
+| "Who is the current president of France?" | web search â†’ "Emmanuel Macron" |
 | FDA's own echo while it talks | **0** false interruptions |
 
 The simulated echo path is linear; a real speaker adds distortion, so tune on the real hardware (see below).
@@ -177,6 +177,19 @@ game", "restart", "close the game". The settings are room state (`game` tool in 
 `fda/room.py`); the display pushes each change into `fda/games/sky_hop.html`. While the game is open the display
 keeps only the Lights and Music cards so the game fits the 800x480 screen. Offline planner: 12/12 on game commands.
 
+## Publishing to GitHub Pages (only when you say so)
+
+Build something by voice (a website, a game, an app), change it live, then say "publish it" or "put it on my
+GitHub". Elkit pushes it to the **main address of your site, `https://<user>.github.io/`, as the home page**, with
+no extra folder. It uses a folder only when you name one: "publish it in a folder called games" ->
+`https://<user>.github.io/games/`. When the new version is online, Elkit reloads the page on the screen and says
+so; "open my github io" shows it any time. Nothing is published on its own (`publish_auto = false`).
+
+Setup on the Pi (`fda.toml`): `publish_games = true`, `publish_url = "https://<user>.github.io/"`, `publish_dir`
+= a clone of the site repo that can push (a deploy key with write access). GitHub serves the bare
+`<user>.github.io` address only from a repo named `<user>.github.io` (Pages: main branch, `/docs`). Code:
+`fda/publish.py`; the request is `_publish_direct` / the `publish_game` tool in `fda/pc/agent.py`.
+
 ## Windows laptop
 
 1. Install Python 3.12 from python.org (tick "Add python.exe to PATH").
@@ -187,7 +200,7 @@ keeps only the Lights and Music cards so the game fits the 800x480 screen. Offli
 4. Start on login: `deploy\windows\autostart_on.bat` (undo: `autostart_off.bat`).
 
 **Windows tip:** many laptops already cancel echo on the built-in mic ("Audio enhancements"). Two cancellers fight. Try
-FDA's own first (default). If voices sound choppy, either turn off *Settings → Sound → (mic) → Audio enhancements*, or
+FDA's own first (default). If voices sound choppy, either turn off *Settings â†’ Sound â†’ (mic) â†’ Audio enhancements*, or
 run `start_fda.bat --no-aec` to use only Windows'.
 
 ## Raspberry Pi 5
@@ -224,6 +237,7 @@ chains fall back to the offline engines. Engine choices: [ENGINES.md](ENGINES.md
 | `planner_say_first` | `true` | ~190 ms faster first word; `false` = decide actions before speaking |
 | `vcm_fast_path` | `true` | your VCM intent model acts instantly on very confident lights/pause/next/volume commands (undone if the transcript disagrees) |
 | `record_dir` | off | saves `mic`, `ref`, `clean` WAVs for tuning echo cancellation |
+| `publish_games` / `publish_url` / `publish_dir` | off / "" / `~/elkit-site` | "publish it" puts what is on screen on your site's main address (see Publishing) |
 
 ## Commands
 
